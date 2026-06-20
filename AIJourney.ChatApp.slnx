@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AIJourney.Api/AIJourney.Api.csproj" />
+  <Project Path="AIJourney.Web/AIJourney.Web.csproj" />
+</Solution>
