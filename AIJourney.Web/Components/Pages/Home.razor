@@ -6,9 +6,9 @@
 <div class="chat-app">
     <aside class="history-panel" aria-label="Chat history">
         <div class="profile">
-            <div class="avatar" aria-hidden="true">AJ</div>
+            <div class="avatar" aria-hidden="true">@UserInitials</div>
             <div>
-                <div class="profile-name">Alex Johnson</div>
+                <div class="profile-name">@CurrentUserName</div>
                 <div class="profile-status">AI Journey</div>
             </div>
         </div>
@@ -18,7 +18,7 @@
         <div class="history-list">
             @foreach (var chat in ChatHistory)
             {
-                <button class="history-item @(chat.IsActive ? "active" : null)" type="button">
+                <button class="history-item" type="button">
                     <span class="history-title">@chat.Title</span>
                     <span class="history-preview">@chat.Preview</span>
                 </button>
@@ -26,68 +26,69 @@
         </div>
     </aside>
 
-    <section class="conversation-panel" aria-label="Chat conversation">
-        <header class="conversation-header">
-            <div>
-                <h1>AI Journey</h1>
-                <p>Text chat with your model</p>
+    <section class="start-panel" aria-label="Start a chat">
+        <div class="start-content">
+            <p class="timestamp">@CurrentTimestamp</p>
+            <h1>Good evening @CurrentUserName</h1>
+
+            <EditForm Model="this" OnSubmit="StartConversation" class="start-composer">
+                <InputTextArea @bind-Value="DraftMessage"
+                               class="start-input"
+                               placeholder="Lets start our conversation"
+                               rows="3" />
+                <button class="start-send-button" type="submit" disabled="@string.IsNullOrWhiteSpace(DraftMessage)">Send</button>
+            </EditForm>
+
+            <div class="starter-actions" aria-label="Starter prompts">
+                @foreach (var prompt in StarterPrompts)
+                {
+                    <button class="starter-button" type="button" @onclick="() => UseStarterPrompt(prompt)">
+                        @prompt
+                    </button>
+                }
             </div>
-            <span class="model-badge">Model ready</span>
-        </header>
-
-        <div class="message-list">
-            @foreach (var message in Messages)
-            {
-                <article class="message @message.Role">
-                    <div class="message-author">@message.Author</div>
-                    <div class="message-bubble">@message.Text</div>
-                </article>
-            }
         </div>
-
-        <EditForm Model="this" OnSubmit="SendMessage" class="composer">
-            <InputTextArea @bind-Value="DraftMessage"
-                           class="composer-input"
-                           placeholder="Type a message..."
-                           rows="1" />
-            <button class="send-button" type="submit" disabled="@string.IsNullOrWhiteSpace(DraftMessage)">Send</button>
-        </EditForm>
     </section>
 </div>
 
 @code {
     private string DraftMessage { get; set; } = string.Empty;
 
+    private string CurrentUserName { get; } = Environment.UserName;
+
+    private string CurrentTimestamp { get; } = DateTime.Now.ToString("dddd, MMMM d, yyyy h:mm tt");
+
+    private string UserInitials => string.Join(
+        string.Empty,
+        CurrentUserName
+            .Split([' ', '.', '_', '-'], StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .Select(part => char.ToUpperInvariant(part[0])));
+
     private List<ChatHistoryItem> ChatHistory { get; } =
     [
-        new("Planning the first lesson", "Structure the AI learning path", true),
+        new("Planning the first lesson", "Structure the AI learning path"),
         new("Prompt ideas", "Draft examples for practice"),
         new("Model comparison", "Notes on quality and latency"),
         new("Next milestones", "Weekly goals and checkpoints")
     ];
 
-    private List<ChatMessage> Messages { get; } =
+    private List<string> StarterPrompts { get; } =
     [
-        new("assistant", "AI Model", "Hi Alex. What would you like to explore today?"),
-        new("user", "You", "Help me plan a simple learning path for AI fundamentals."),
-        new("assistant", "AI Model", "Start with core concepts, then practice with small prompts, evaluations, and one small app.")
+        "Explain a concept",
+        "Help me build a project",
+        "Plan my AI learning Path"
     ];
 
-    private void SendMessage()
+    private void UseStarterPrompt(string prompt)
     {
-        var text = DraftMessage.Trim();
-
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return;
-        }
-
-        Messages.Add(new ChatMessage("user", "You", text));
-        Messages.Add(new ChatMessage("assistant", "AI Model", "This is where the model response will appear once the backend is connected."));
-        DraftMessage = string.Empty;
+        DraftMessage = prompt;
     }
 
-    private sealed record ChatHistoryItem(string Title, string Preview, bool IsActive = false);
+    private void StartConversation()
+    {
+        DraftMessage = DraftMessage.Trim();
+    }
 
-    private sealed record ChatMessage(string Role, string Author, string Text);
+    private sealed record ChatHistoryItem(string Title, string Preview);
 }

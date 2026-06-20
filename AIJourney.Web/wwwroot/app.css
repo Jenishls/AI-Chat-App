@@ -121,11 +121,103 @@ button:disabled {
     font-size: 0.86rem;
 }
 
-.conversation-panel {
+.conversation-panel,
+.start-panel {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
     min-height: 100vh;
     background: #f8fafc;
+}
+
+.start-panel {
+    place-items: center;
+    padding: 32px;
+}
+
+.start-content {
+    display: grid;
+    gap: 22px;
+    width: min(760px, 100%);
+}
+
+.timestamp {
+    margin: 0;
+    color: #667487;
+    text-align: center;
+    font-size: 0.95rem;
+}
+
+.start-content h1 {
+    margin: 0;
+    color: #17202b;
+    text-align: center;
+    font-size: clamp(2rem, 5vw, 4.6rem);
+    line-height: 1.05;
+}
+
+.start-composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid #dce3ea;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 22px 48px rgba(23, 32, 43, 0.10);
+}
+
+.start-input {
+    min-height: 80px;
+    padding: 10px 12px;
+    resize: vertical;
+    border: 0;
+    outline: none;
+    color: #1d252f;
+    background: transparent;
+}
+
+.start-send-button {
+    align-self: end;
+    min-width: 92px;
+    min-height: 44px;
+    border: 0;
+    border-radius: 8px;
+    color: #ffffff;
+    background: #245a9a;
+    font-weight: 800;
+}
+
+.start-send-button:hover:not(:disabled) {
+    background: #1d497d;
+}
+
+.start-send-button:disabled {
+    opacity: 0.55;
+}
+
+.starter-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.starter-button {
+    min-height: 54px;
+    padding: 12px;
+    border: 1px solid #d6dee8;
+    border-radius: 8px;
+    color: #253142;
+    background: #ffffff;
+    font-weight: 700;
+    text-align: center;
+}
+
+.starter-button:hover {
+    border-color: #9db3cc;
+    background: #eef5fb;
+}
+
+.conversation-panel {
+    grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .conversation-header {
@@ -294,12 +386,14 @@ button:disabled {
 
     .conversation-header,
     .message-list,
-    .composer {
+    .composer,
+    .start-panel {
         padding-left: 18px;
         padding-right: 18px;
     }
 
-    .conversation-panel {
+    .conversation-panel,
+    .start-panel {
         min-height: calc(100vh - 220px);
     }
 
@@ -314,11 +408,14 @@ button:disabled {
         flex-direction: column;
     }
 
-    .composer {
+    .composer,
+    .start-composer,
+    .starter-actions {
         grid-template-columns: 1fr;
     }
 
-    .send-button {
+    .send-button,
+    .start-send-button {
         width: 100%;
     }
 }
