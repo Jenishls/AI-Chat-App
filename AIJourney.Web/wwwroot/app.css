@@ -121,6 +121,12 @@ button:disabled {
     font-size: 0.86rem;
 }
 
+.history-empty {
+    padding: 12px;
+    color: #aeb9c6;
+    font-size: 0.9rem;
+}
+
 .conversation-panel,
 .start-panel {
     display: grid;
@@ -214,6 +220,12 @@ button:disabled {
 .starter-button:hover {
     border-color: #9db3cc;
     background: #eef5fb;
+}
+
+.status-message {
+    margin: 0;
+    color: #667487;
+    text-align: center;
 }
 
 .conversation-panel {

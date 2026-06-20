@@ -1,5 +1,9 @@
 @page "/"
+@page "/chats/{ChatId:guid}"
 @rendermode InteractiveServer
+@using AIJourney.Web.Services
+@inject AIJourney.Web.Services.ChatApiClient ChatApi
+@inject NavigationManager Navigation
 
 <PageTitle>AI Journey Chat</PageTitle>
 
@@ -13,50 +17,133 @@
             </div>
         </div>
 
-        <button class="new-chat-button" type="button">New chat</button>
+        <button class="new-chat-button" type="button" @onclick="StartNewChat">New chat</button>
 
         <div class="history-list">
-            @foreach (var chat in ChatHistory)
+            @if (IsLoadingHistory)
             {
-                <button class="history-item" type="button">
-                    <span class="history-title">@chat.Title</span>
-                    <span class="history-preview">@chat.Preview</span>
-                </button>
+                <div class="history-empty">Loading chats...</div>
+            }
+            else if (ChatHistory.Count == 0)
+            {
+                <div class="history-empty">No chats yet</div>
+            }
+            else
+            {
+                @foreach (var chat in ChatHistory)
+                {
+                    <button class="history-item @(chat.Id == ChatId ? "active" : null)"
+                            type="button"
+                            @onclick="() => OpenChat(chat.Id)">
+                        <span class="history-title">@chat.Title</span>
+                        <span class="history-preview">@GetPreview(chat)</span>
+                    </button>
+                }
             }
         </div>
     </aside>
 
-    <section class="start-panel" aria-label="Start a chat">
-        <div class="start-content">
-            <p class="timestamp">@CurrentTimestamp</p>
-            <h1>Good evening @CurrentUserName</h1>
+    @if (ChatId is null)
+    {
+        <section class="start-panel" aria-label="Start a chat">
+            <div class="start-content">
+                <p class="timestamp">@CurrentTimestamp</p>
+                <h1>Good evening @CurrentUserName</h1>
 
-            <EditForm Model="this" OnSubmit="StartConversation" class="start-composer">
-                <InputTextArea @bind-Value="DraftMessage"
-                               class="start-input"
-                               placeholder="Lets start our conversation"
-                               rows="3" />
-                <button class="start-send-button" type="submit" disabled="@string.IsNullOrWhiteSpace(DraftMessage)">Send</button>
-            </EditForm>
+                <EditForm Model="this" OnSubmit="StartConversationAsync" class="start-composer">
+                    <InputTextArea @bind-Value="DraftMessage"
+                                   class="start-input"
+                                   placeholder="Lets start our conversation"
+                                   rows="3" />
+                    <button class="start-send-button" type="submit" disabled="@IsSendDisabled">Send</button>
+                </EditForm>
 
-            <div class="starter-actions" aria-label="Starter prompts">
-                @foreach (var prompt in StarterPrompts)
+                <div class="starter-actions" aria-label="Starter prompts">
+                    @foreach (var prompt in StarterPrompts)
+                    {
+                        <button class="starter-button" type="button" @onclick="() => UseStarterPrompt(prompt)">
+                            @prompt
+                        </button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(ErrorMessage))
                 {
-                    <button class="starter-button" type="button" @onclick="() => UseStarterPrompt(prompt)">
-                        @prompt
-                    </button>
+                    <p class="status-message">@ErrorMessage</p>
                 }
             </div>
-        </div>
-    </section>
+        </section>
+    }
+    else
+    {
+        <section class="conversation-panel" aria-label="Chat conversation">
+            <header class="conversation-header">
+                <div>
+                    <h1>@(ActiveChat?.Title ?? "AI Journey")</h1>
+                    <p>Text chat with your model</p>
+                </div>
+                <span class="model-badge">Model ready</span>
+            </header>
+
+            <div class="message-list">
+                @if (IsLoadingMessages)
+                {
+                    <p class="status-message">Loading conversation...</p>
+                }
+                else if (Messages.Count == 0)
+                {
+                    <p class="status-message">Start this conversation with a message.</p>
+                }
+                else
+                {
+                    @foreach (var message in Messages)
+                    {
+                        <article class="message @message.Role.ToLowerInvariant()">
+                            <div class="message-author">@GetAuthor(message.Role)</div>
+                            <div class="message-bubble">@message.Content</div>
+                        </article>
+                    }
+                }
+            </div>
+
+            <EditForm Model="this" OnSubmit="SendMessageAsync" class="composer">
+                <InputTextArea @bind-Value="DraftMessage"
+                               class="composer-input"
+                               placeholder="Type a message..."
+                               rows="1" />
+                <button class="send-button" type="submit" disabled="@IsSendDisabled">Send</button>
+            </EditForm>
+        </section>
+    }
 </div>
 
 @code {
+    [Parameter]
+    public Guid? ChatId { get; set; }
+
     private string DraftMessage { get; set; } = string.Empty;
+
+    private string? ErrorMessage { get; set; }
+
+    private bool IsLoadingHistory { get; set; }
+
+    private bool IsLoadingMessages { get; set; }
+
+    private bool IsSending { get; set; }
+
+    private Guid? LoadedChatId { get; set; }
+
+    private ChatDto? ActiveChat { get; set; }
+
+    private List<ChatDto> ChatHistory { get; set; } = [];
+
+    private List<ChatMessageDto> Messages { get; set; } = [];
 
     private string CurrentUserName { get; } = Environment.UserName;
 
     private string CurrentTimestamp { get; } = DateTime.Now.ToString("dddd, MMMM d, yyyy h:mm tt");
+
+    private bool IsSendDisabled => IsSending || string.IsNullOrWhiteSpace(DraftMessage);
 
     private string UserInitials => string.Join(
         string.Empty,
@@ -65,14 +152,6 @@
             .Take(2)
             .Select(part => char.ToUpperInvariant(part[0])));
 
-    private List<ChatHistoryItem> ChatHistory { get; } =
-    [
-        new("Planning the first lesson", "Structure the AI learning path"),
-        new("Prompt ideas", "Draft examples for practice"),
-        new("Model comparison", "Notes on quality and latency"),
-        new("Next milestones", "Weekly goals and checkpoints")
-    ];
-
     private List<string> StarterPrompts { get; } =
     [
         "Explain a concept",
@@ -80,15 +159,154 @@
         "Plan my AI learning Path"
     ];
 
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadChatHistoryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ChatId is null)
+        {
+            ActiveChat = null;
+            Messages = [];
+            LoadedChatId = null;
+            return;
+        }
+
+        if (LoadedChatId == ChatId)
+        {
+            return;
+        }
+
+        await LoadConversationAsync(ChatId.Value);
+    }
+
+    private async Task LoadChatHistoryAsync()
+    {
+        IsLoadingHistory = true;
+        ErrorMessage = null;
+
+        try
+        {
+            ChatHistory = await ChatApi.GetChatsAsync();
+        }
+        catch (Exception)
+        {
+            ErrorMessage = "Could not load chat history. Make sure the API is running.";
+        }
+        finally
+        {
+            IsLoadingHistory = false;
+        }
+    }
+
+    private async Task LoadConversationAsync(Guid chatId)
+    {
+        IsLoadingMessages = true;
+        ErrorMessage = null;
+
+        try
+        {
+            ActiveChat = await ChatApi.GetChatAsync(chatId);
+            Messages = await ChatApi.GetMessagesAsync(chatId);
+            LoadedChatId = chatId;
+        }
+        catch (Exception)
+        {
+            ErrorMessage = "Could not load this conversation.";
+            Messages = [];
+        }
+        finally
+        {
+            IsLoadingMessages = false;
+        }
+    }
+
     private void UseStarterPrompt(string prompt)
     {
         DraftMessage = prompt;
     }
 
-    private void StartConversation()
+    private async Task StartConversationAsync()
     {
-        DraftMessage = DraftMessage.Trim();
+        var text = DraftMessage.Trim();
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        IsSending = true;
+        ErrorMessage = null;
+
+        try
+        {
+            var chat = await ChatApi.CreateChatAsync(text);
+            DraftMessage = string.Empty;
+            await LoadChatHistoryAsync();
+            Navigation.NavigateTo($"/chats/{chat.Id}");
+        }
+        catch (Exception)
+        {
+            ErrorMessage = "Could not create the chat. Make sure the API and SQL Server are running.";
+        }
+        finally
+        {
+            IsSending = false;
+        }
     }
 
-    private sealed record ChatHistoryItem(string Title, string Preview);
+    private async Task SendMessageAsync()
+    {
+        if (ChatId is null)
+        {
+            await StartConversationAsync();
+            return;
+        }
+
+        var text = DraftMessage.Trim();
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        IsSending = true;
+        ErrorMessage = null;
+
+        try
+        {
+            var newMessages = await ChatApi.CreateMessageAsync(ChatId.Value, text);
+            Messages.AddRange(newMessages);
+            DraftMessage = string.Empty;
+            await LoadChatHistoryAsync();
+        }
+        catch (Exception)
+        {
+            ErrorMessage = "Could not send the message.";
+        }
+        finally
+        {
+            IsSending = false;
+        }
+    }
+
+    private void StartNewChat()
+    {
+        DraftMessage = string.Empty;
+        Navigation.NavigateTo("/");
+    }
+
+    private void OpenChat(Guid chatId)
+    {
+        DraftMessage = string.Empty;
+        Navigation.NavigateTo($"/chats/{chatId}");
+    }
+
+    private static string GetPreview(ChatDto chat) =>
+        string.IsNullOrWhiteSpace(chat.Preview) ? "No messages yet" : chat.Preview;
+
+    private static string GetAuthor(string role) =>
+        role.Equals("User", StringComparison.OrdinalIgnoreCase) ? "You" : "AI Model";
 }
