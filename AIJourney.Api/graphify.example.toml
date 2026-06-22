@@ -1,0 +1,5 @@
+[semantic]
+backend = "gemini"
+model = "models/text-embedding-004"
+# Copy this file to graphify.toml and set api_key locally.
+# Never commit the real graphify.toml.

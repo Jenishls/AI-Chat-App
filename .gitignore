@@ -486,9 +486,17 @@ $RECYCLE.BIN/
 **/.keys/
 
 # Block heavy parsing caches and time-invalid manifests
+AIJourney.Api/graphify.toml
 graphify-out/cache/
+graphify-out/GRAPH_REPORT.md
 graphify-out/manifest.json
 graphify-out/cost.json
+graphify-out/.graphify_*.json
+graphify-out/.graphify_*marker
+graphify-out/*/
+graphify-out/*/.graphify_*.json
+graphify-out/*/.graphify_*marker
+graphify-out/*/manifest.json
 
 # If you prefer to completely keep the HTML/JSON graphs local and off GitHub,
 # uncomment the next line to ignore the entire output directory:
