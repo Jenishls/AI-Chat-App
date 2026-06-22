@@ -484,3 +484,12 @@ $RECYCLE.BIN/
 # ASP.NET Core Data Protection keys generated for local cookie auth
 .keys/
 **/.keys/
+
+# Block heavy parsing caches and time-invalid manifests
+graphify-out/cache/
+graphify-out/manifest.json
+graphify-out/cost.json
+
+# If you prefer to completely keep the HTML/JSON graphs local and off GitHub,
+# uncomment the next line to ignore the entire output directory:
+# graphify-out/
