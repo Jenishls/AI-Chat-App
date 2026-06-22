@@ -302,6 +302,12 @@ button:disabled {
     box-shadow: 0 10px 22px rgba(23, 32, 43, 0.06);
 }
 
+.message.pending .message-bubble {
+    color: #667487;
+    font-style: italic;
+    background: #f4f7fa;
+}
+
 .message.user .message-bubble {
     border-color: #245a9a;
     color: #ffffff;

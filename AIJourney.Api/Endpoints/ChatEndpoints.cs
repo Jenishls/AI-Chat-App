@@ -1,12 +1,19 @@
 using AIJourney.Api.Contracts;
 using AIJourney.Api.Data;
 using AIJourney.Api.Models;
+using AIJourney.Api.Options;
+using AIJourney.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace AIJourney.Api.Endpoints;
 
 public static class ChatEndpoints
 {
+    private const string ModelBusyMessage = "The model is busy. Please try again.";
+    private const string ModelTimeoutMessage = "The model took too long to respond. Please try again.";
+    private const string ModelFailureMessage = "The model is unavailable right now. Please try again.";
+
     public static RouteGroupBuilder MapChatEndpoints(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/chats")
@@ -65,6 +72,9 @@ public static class ChatEndpoints
     private static async Task<IResult> CreateChat(
         CreateChatRequest request,
         AIJourneyDbContext db,
+        OllamaChatClient ollama,
+        OllamaGenerationLimiter limiter,
+        IOptions<OllamaOptions> ollamaOptions,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
@@ -79,17 +89,32 @@ public static class ChatEndpoints
             IsDeleted = false
         };
 
+        ChatMessage? userMessage = null;
+        ChatMessage? assistantMessage = null;
+
         db.Chats.Add(chat);
 
         if (!string.IsNullOrWhiteSpace(request.InitialMessage))
         {
-            AddMessage(chat, ChatRole.User, request.InitialMessage.Trim(), now);
-            AddMessage(chat, ChatRole.Assistant, "This is where the model response will appear once the AI service is connected.", now.AddMilliseconds(1));
+            userMessage = CreateMessageEntity(chat.Id, ChatRole.User, request.InitialMessage.Trim(), now);
+            db.ChatMessages.Add(userMessage);
         }
 
         await db.SaveChangesAsync(cancellationToken);
 
-        var dto = new ChatDto(chat.Id, chat.Title, chat.CreatedAtUtc, chat.UpdatedAtUtc, request.InitialMessage?.Trim());
+        if (userMessage is not null)
+        {
+            assistantMessage = await GenerateAndSaveAssistantMessageAsync(
+                chat,
+                db,
+                ollama,
+                limiter,
+                ollamaOptions.Value,
+                cancellationToken);
+        }
+
+        var preview = assistantMessage?.Content ?? userMessage?.Content;
+        var dto = new ChatDto(chat.Id, chat.Title, chat.CreatedAtUtc, chat.UpdatedAtUtc, preview);
         return Results.Created($"/api/chats/{chat.Id}", dto);
     }
 
@@ -166,6 +191,9 @@ public static class ChatEndpoints
         Guid chatId,
         CreateMessageRequest request,
         AIJourneyDbContext db,
+        OllamaChatClient ollama,
+        OllamaGenerationLimiter limiter,
+        IOptions<OllamaOptions> ollamaOptions,
         CancellationToken cancellationToken)
     {
         var content = request.Content.Trim();
@@ -175,9 +203,7 @@ public static class ChatEndpoints
             return Results.BadRequest("Message content is required.");
         }
 
-        var chat = await db.Chats
-            .Include(chat => chat.Messages)
-            .FirstOrDefaultAsync(chat => chat.Id == chatId, cancellationToken);
+        var chat = await db.Chats.FirstOrDefaultAsync(chat => chat.Id == chatId, cancellationToken);
 
         if (chat is null)
         {
@@ -185,30 +211,25 @@ public static class ChatEndpoints
         }
 
         var now = DateTimeOffset.UtcNow;
-        var userMessage = AddMessage(chat, ChatRole.User, content, now);
-        ChatMessage? assistantMessage = null;
+        var userMessage = CreateMessageEntity(chat.Id, ChatRole.User, content, now);
 
-        if (request.IncludeAssistantPlaceholder)
-        {
-            assistantMessage = AddMessage(
-                chat,
-                ChatRole.Assistant,
-                "This is where the model response will appear once the AI service is connected.",
-                now.AddMilliseconds(1));
-        }
-
+        db.ChatMessages.Add(userMessage);
         chat.UpdatedAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
 
+        var assistantMessage = await GenerateAndSaveAssistantMessageAsync(
+            chat,
+            db,
+            ollama,
+            limiter,
+            ollamaOptions.Value,
+            cancellationToken);
+
         var messages = new List<ChatMessageDto>
         {
-            ToDto(userMessage)
+            ToDto(userMessage),
+            ToDto(assistantMessage)
         };
-
-        if (assistantMessage is not null)
-        {
-            messages.Add(ToDto(assistantMessage));
-        }
 
         return Results.Created($"/api/chats/{chatId}/messages/{userMessage.Id}", messages);
     }
@@ -241,23 +262,95 @@ public static class ChatEndpoints
         return Results.NoContent();
     }
 
-    private static ChatMessage AddMessage(Chat chat, ChatRole role, string content, DateTimeOffset createdAtUtc)
+    private static ChatMessage CreateMessageEntity(Guid chatId, ChatRole role, string content, DateTimeOffset createdAtUtc)
     {
-        var message = new ChatMessage
+        return new ChatMessage
         {
             Id = Guid.NewGuid(),
-            ChatId = chat.Id,
+            ChatId = chatId,
             Role = role,
             Content = content,
             CreatedAtUtc = createdAtUtc
         };
-
-        chat.Messages.Add(message);
-        return message;
     }
 
     private static ChatMessageDto ToDto(ChatMessage message) =>
         new(message.Id, message.ChatId, message.Role.ToString(), message.Content, message.CreatedAtUtc);
+
+    private static async Task<ChatMessage> GenerateAndSaveAssistantMessageAsync(
+        Chat chat,
+        AIJourneyDbContext db,
+        OllamaChatClient ollama,
+        OllamaGenerationLimiter limiter,
+        OllamaOptions options,
+        CancellationToken cancellationToken)
+    {
+        using var generationSlot = await limiter.TryAcquireAsync(cancellationToken);
+
+        if (generationSlot is null)
+        {
+            return await AddAndSaveAssistantMessageAsync(chat, db, ModelBusyMessage, cancellationToken);
+        }
+
+        try
+        {
+            var history = await LoadOllamaHistoryAsync(db, chat.Id, options.MaxHistoryMessages, cancellationToken);
+            var response = await ollama.GenerateAsync(history, cancellationToken);
+            return await AddAndSaveAssistantMessageAsync(chat, db, response, cancellationToken);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return await AddAndSaveAssistantMessageAsync(chat, db, ModelTimeoutMessage, cancellationToken);
+        }
+        catch
+        {
+            return await AddAndSaveAssistantMessageAsync(chat, db, ModelFailureMessage, cancellationToken);
+        }
+    }
+
+    private static async Task<List<OllamaMessage>> LoadOllamaHistoryAsync(
+        AIJourneyDbContext db,
+        Guid chatId,
+        int maxHistoryMessages,
+        CancellationToken cancellationToken)
+    {
+        var take = Math.Max(1, maxHistoryMessages);
+
+        var messages = await db.ChatMessages
+            .AsNoTracking()
+            .Where(message => message.ChatId == chatId)
+            .OrderByDescending(message => message.CreatedAtUtc)
+            .Take(take)
+            .OrderBy(message => message.CreatedAtUtc)
+            .Select(message => new OllamaMessage(
+                message.Role == ChatRole.User ? "user" : "assistant",
+                message.Content))
+            .ToListAsync(cancellationToken);
+
+        return messages;
+    }
+
+    private static async Task<ChatMessage> AddAndSaveAssistantMessageAsync(
+        Chat chat,
+        AIJourneyDbContext db,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var assistantMessage = new ChatMessage
+        {
+            Id = Guid.NewGuid(),
+            ChatId = chat.Id,
+            Role = ChatRole.Assistant,
+            Content = content,
+            CreatedAtUtc = now
+        };
+
+        db.ChatMessages.Add(assistantMessage);
+        chat.UpdatedAtUtc = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return assistantMessage;
+    }
 
     private static string NormalizeTitle(string? title, string? initialMessage)
     {

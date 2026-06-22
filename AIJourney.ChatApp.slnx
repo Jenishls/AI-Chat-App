@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="AIJourney.Api/AIJourney.Api.csproj" />
+  <Project Path="AIJourney.Api.Tests/AIJourney.Api.Tests.csproj" />
   <Project Path="AIJourney.Web/AIJourney.Web.csproj" />
+  <Project Path="AIJourney.Web.Tests/AIJourney.Web.Tests.csproj" />
 </Solution>

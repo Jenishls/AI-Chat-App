@@ -56,4 +56,4 @@ public sealed record ChatMessageDto(
 
 public sealed record CreateChatRequest(string? Title, string? InitialMessage);
 
-public sealed record CreateMessageRequest(string Content, bool IncludeAssistantPlaceholder = true);
+public sealed record CreateMessageRequest(string Content);

@@ -51,11 +51,12 @@
                 <h1>Good evening @CurrentUserName</h1>
 
                 <EditForm Model="this" OnSubmit="StartConversationAsync" class="start-composer">
-                    <InputTextArea @bind-Value="DraftMessage"
-                                   class="start-input"
-                                   placeholder="Lets start our conversation"
-                                   rows="3" />
-                    <button class="start-send-button" type="submit" disabled="@IsSendDisabled">Send</button>
+                    <textarea @bind="DraftMessage"
+                              @bind:event="oninput"
+                              class="start-input"
+                              placeholder="Lets start our conversation"
+                              rows="3"></textarea>
+                    <button class="start-send-button" type="submit" disabled="@IsSendDisabled">@SendButtonText</button>
                 </EditForm>
 
                 <div class="starter-actions" aria-label="Starter prompts">
@@ -98,7 +99,7 @@
                 {
                     @foreach (var message in Messages)
                     {
-                        <article class="message @message.Role.ToLowerInvariant()">
+                        <article class="message @message.Role.ToLowerInvariant() @(message.IsPending ? "pending" : null)">
                             <div class="message-author">@GetAuthor(message.Role)</div>
                             <div class="message-bubble">@message.Content</div>
                         </article>
@@ -107,11 +108,12 @@
             </div>
 
             <EditForm Model="this" OnSubmit="SendMessageAsync" class="composer">
-                <InputTextArea @bind-Value="DraftMessage"
-                               class="composer-input"
-                               placeholder="Type a message..."
-                               rows="1" />
-                <button class="send-button" type="submit" disabled="@IsSendDisabled">Send</button>
+                <textarea @bind="DraftMessage"
+                          @bind:event="oninput"
+                          class="composer-input"
+                          placeholder="Type a message..."
+                          rows="1"></textarea>
+                <button class="send-button" type="submit" disabled="@IsSendDisabled">@SendButtonText</button>
             </EditForm>
         </section>
     }
@@ -137,13 +139,15 @@
 
     private List<ChatDto> ChatHistory { get; set; } = [];
 
-    private List<ChatMessageDto> Messages { get; set; } = [];
+    private List<ChatMessageViewModel> Messages { get; set; } = [];
 
     private string CurrentUserName { get; } = Environment.UserName;
 
     private string CurrentTimestamp { get; } = DateTime.Now.ToString("dddd, MMMM d, yyyy h:mm tt");
 
     private bool IsSendDisabled => IsSending || string.IsNullOrWhiteSpace(DraftMessage);
+
+    private string SendButtonText => IsSending ? "Sending..." : "Send";
 
     private string UserInitials => string.Join(
         string.Empty,
@@ -209,7 +213,9 @@
         try
         {
             ActiveChat = await ChatApi.GetChatAsync(chatId);
-            Messages = await ChatApi.GetMessagesAsync(chatId);
+            Messages = (await ChatApi.GetMessagesAsync(chatId))
+                .Select(ChatMessageViewModel.FromDto)
+                .ToList();
             LoadedChatId = chatId;
         }
         catch (Exception)
@@ -239,11 +245,12 @@
 
         IsSending = true;
         ErrorMessage = null;
+        DraftMessage = string.Empty;
+        StateHasChanged();
 
         try
         {
             var chat = await ChatApi.CreateChatAsync(text);
-            DraftMessage = string.Empty;
             await LoadChatHistoryAsync();
             Navigation.NavigateTo($"/chats/{chat.Id}");
         }
@@ -277,14 +284,21 @@
 
         try
         {
-            var newMessages = await ChatApi.CreateMessageAsync(ChatId.Value, text);
-            Messages.AddRange(newMessages);
             DraftMessage = string.Empty;
+            var temporaryUserMessage = ChatMessageViewModel.CreateTemporary("User", text);
+            var temporaryAssistantMessage = ChatMessageViewModel.CreateTemporary("Assistant", "AI Model is thinking...", isPending: true);
+            Messages.Add(temporaryUserMessage);
+            Messages.Add(temporaryAssistantMessage);
+            StateHasChanged();
+
+            var newMessages = await ChatApi.CreateMessageAsync(ChatId.Value, text);
+            ReplaceTemporaryMessages(temporaryUserMessage.Id, temporaryAssistantMessage.Id, newMessages);
             await LoadChatHistoryAsync();
         }
         catch (Exception)
         {
             ErrorMessage = "Could not send the message.";
+            ReplacePendingAssistantMessage("Could not reach the server. Please try again.");
         }
         finally
         {
@@ -309,4 +323,50 @@
 
     private static string GetAuthor(string role) =>
         role.Equals("User", StringComparison.OrdinalIgnoreCase) ? "You" : "AI Model";
+
+    private void ReplaceTemporaryMessages(
+        Guid temporaryUserMessageId,
+        Guid temporaryAssistantMessageId,
+        IReadOnlyList<ChatMessageDto> savedMessages)
+    {
+        Messages.RemoveAll(message =>
+            message.Id == temporaryUserMessageId ||
+            message.Id == temporaryAssistantMessageId);
+
+        Messages.AddRange(savedMessages.Select(ChatMessageViewModel.FromDto));
+    }
+
+    private void ReplacePendingAssistantMessage(string content)
+    {
+        var pendingMessage = Messages.LastOrDefault(message =>
+            message.Role.Equals("Assistant", StringComparison.OrdinalIgnoreCase) &&
+            message.IsPending);
+
+        if (pendingMessage is null)
+        {
+            return;
+        }
+
+        var index = Messages.IndexOf(pendingMessage);
+        Messages[index] = pendingMessage with
+        {
+            Content = content,
+            IsPending = false
+        };
+    }
+
+    private sealed record ChatMessageViewModel(
+        Guid Id,
+        Guid ChatId,
+        string Role,
+        string Content,
+        DateTimeOffset CreatedAtUtc,
+        bool IsPending = false)
+    {
+        public static ChatMessageViewModel FromDto(ChatMessageDto message) =>
+            new(message.Id, message.ChatId, message.Role, message.Content, message.CreatedAtUtc);
+
+        public static ChatMessageViewModel CreateTemporary(string role, string content, bool isPending = false) =>
+            new(Guid.NewGuid(), Guid.Empty, role, content, DateTimeOffset.UtcNow, isPending);
+    }
 }
