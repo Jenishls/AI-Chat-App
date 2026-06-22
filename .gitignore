@@ -480,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# ASP.NET Core Data Protection keys generated for local cookie auth
+.keys/
+**/.keys/

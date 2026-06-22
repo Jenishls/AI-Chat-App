@@ -5,6 +5,7 @@ using AIJourney.Api.Options;
 using AIJourney.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 
 namespace AIJourney.Api.Endpoints;
 
@@ -17,7 +18,8 @@ public static class ChatEndpoints
     public static RouteGroupBuilder MapChatEndpoints(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/chats")
-            .WithTags("Chats");
+            .WithTags("Chats")
+            .RequireAuthorization();
 
         group.MapGet("/", GetChats).WithName("GetChats");
         group.MapGet("/{chatId:guid}", GetChat).WithName("GetChat");
@@ -31,10 +33,15 @@ public static class ChatEndpoints
         return group;
     }
 
-    private static async Task<IResult> GetChats(AIJourneyDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> GetChats(
+        ClaimsPrincipal user,
+        AIJourneyDbContext db,
+        CancellationToken cancellationToken)
     {
+        var userId = GetUserId(user);
         var chats = await db.Chats
             .AsNoTracking()
+            .Where(chat => chat.UserId == userId)
             .OrderByDescending(chat => chat.UpdatedAtUtc)
             .Select(chat => new ChatDto(
                 chat.Id,
@@ -50,11 +57,16 @@ public static class ChatEndpoints
         return Results.Ok(chats);
     }
 
-    private static async Task<IResult> GetChat(Guid chatId, AIJourneyDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> GetChat(
+        Guid chatId,
+        ClaimsPrincipal user,
+        AIJourneyDbContext db,
+        CancellationToken cancellationToken)
     {
+        var userId = GetUserId(user);
         var chat = await db.Chats
             .AsNoTracking()
-            .Where(chat => chat.Id == chatId)
+            .Where(chat => chat.Id == chatId && chat.UserId == userId)
             .Select(chat => new ChatDto(
                 chat.Id,
                 chat.Title,
@@ -71,6 +83,7 @@ public static class ChatEndpoints
 
     private static async Task<IResult> CreateChat(
         CreateChatRequest request,
+        ClaimsPrincipal user,
         AIJourneyDbContext db,
         OllamaChatClient ollama,
         OllamaGenerationLimiter limiter,
@@ -78,11 +91,13 @@ public static class ChatEndpoints
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var userId = GetUserId(user);
         var title = NormalizeTitle(request.Title, request.InitialMessage);
 
         var chat = new Chat
         {
             Id = Guid.NewGuid(),
+            UserId = userId,
             Title = title,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -121,6 +136,7 @@ public static class ChatEndpoints
     private static async Task<IResult> UpdateChat(
         Guid chatId,
         UpdateChatRequest request,
+        ClaimsPrincipal user,
         AIJourneyDbContext db,
         CancellationToken cancellationToken)
     {
@@ -131,7 +147,10 @@ public static class ChatEndpoints
             return Results.BadRequest("Chat title is required.");
         }
 
-        var chat = await db.Chats.FirstOrDefaultAsync(chat => chat.Id == chatId, cancellationToken);
+        var userId = GetUserId(user);
+        var chat = await db.Chats.FirstOrDefaultAsync(
+            chat => chat.Id == chatId && chat.UserId == userId,
+            cancellationToken);
 
         if (chat is null)
         {
@@ -145,9 +164,16 @@ public static class ChatEndpoints
         return Results.Ok(new ChatDto(chat.Id, chat.Title, chat.CreatedAtUtc, chat.UpdatedAtUtc, null));
     }
 
-    private static async Task<IResult> DeleteChat(Guid chatId, AIJourneyDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> DeleteChat(
+        Guid chatId,
+        ClaimsPrincipal user,
+        AIJourneyDbContext db,
+        CancellationToken cancellationToken)
     {
-        var chat = await db.Chats.FirstOrDefaultAsync(chat => chat.Id == chatId, cancellationToken);
+        var userId = GetUserId(user);
+        var chat = await db.Chats.FirstOrDefaultAsync(
+            chat => chat.Id == chatId && chat.UserId == userId,
+            cancellationToken);
 
         if (chat is null)
         {
@@ -163,9 +189,16 @@ public static class ChatEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> GetMessages(Guid chatId, AIJourneyDbContext db, CancellationToken cancellationToken)
+    private static async Task<IResult> GetMessages(
+        Guid chatId,
+        ClaimsPrincipal user,
+        AIJourneyDbContext db,
+        CancellationToken cancellationToken)
     {
-        var chatExists = await db.Chats.AnyAsync(chat => chat.Id == chatId, cancellationToken);
+        var userId = GetUserId(user);
+        var chatExists = await db.Chats.AnyAsync(
+            chat => chat.Id == chatId && chat.UserId == userId,
+            cancellationToken);
 
         if (!chatExists)
         {
@@ -190,6 +223,7 @@ public static class ChatEndpoints
     private static async Task<IResult> CreateMessage(
         Guid chatId,
         CreateMessageRequest request,
+        ClaimsPrincipal user,
         AIJourneyDbContext db,
         OllamaChatClient ollama,
         OllamaGenerationLimiter limiter,
@@ -203,7 +237,10 @@ public static class ChatEndpoints
             return Results.BadRequest("Message content is required.");
         }
 
-        var chat = await db.Chats.FirstOrDefaultAsync(chat => chat.Id == chatId, cancellationToken);
+        var userId = GetUserId(user);
+        var chat = await db.Chats.FirstOrDefaultAsync(
+            chat => chat.Id == chatId && chat.UserId == userId,
+            cancellationToken);
 
         if (chat is null)
         {
@@ -237,10 +274,14 @@ public static class ChatEndpoints
     private static async Task<IResult> DeleteMessage(
         Guid chatId,
         Guid messageId,
+        ClaimsPrincipal user,
         AIJourneyDbContext db,
         CancellationToken cancellationToken)
     {
-        var chat = await db.Chats.FirstOrDefaultAsync(chat => chat.Id == chatId, cancellationToken);
+        var userId = GetUserId(user);
+        var chat = await db.Chats.FirstOrDefaultAsync(
+            chat => chat.Id == chatId && chat.UserId == userId,
+            cancellationToken);
 
         if (chat is null)
         {
@@ -365,4 +406,8 @@ public static class ChatEndpoints
 
         return candidate.Length <= 60 ? candidate : $"{candidate[..57]}...";
     }
+
+    private static string GetUserId(ClaimsPrincipal user) =>
+        user.FindFirstValue(ClaimTypes.NameIdentifier) ??
+        throw new InvalidOperationException("Authenticated user is missing a name identifier claim.");
 }

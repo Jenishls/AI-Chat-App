@@ -20,10 +20,13 @@ public sealed class DatabaseBehaviorTests
         await using (var setupDb = new AIJourneyDbContext(options))
         {
             await setupDb.Database.EnsureCreatedAsync();
+            var user = CreateUser();
+            setupDb.Users.Add(user);
 
             var deletedChat = new Chat
             {
                 Id = Guid.NewGuid(),
+                UserId = user.Id,
                 Title = "Deleted",
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -84,9 +87,12 @@ public sealed class DatabaseBehaviorTests
         await using (var setupDb = new AIJourneyDbContext(options))
         {
             await setupDb.Database.EnsureCreatedAsync();
+            var user = CreateUser();
+            setupDb.Users.Add(user);
             setupDb.Chats.Add(new Chat
             {
                 Id = chatId,
+                UserId = user.Id,
                 Title = "Cascade test",
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -133,9 +139,12 @@ public sealed class DatabaseBehaviorTests
         await using (var setupDb = new AIJourneyDbContext(options))
         {
             await setupDb.Database.EnsureCreatedAsync();
+            var user = CreateUser();
+            setupDb.Users.Add(user);
             setupDb.Chats.Add(new Chat
             {
                 Id = Guid.NewGuid(),
+                UserId = user.Id,
                 Title = "Role conversion",
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -173,9 +182,24 @@ public sealed class DatabaseBehaviorTests
         var message = model.FindEntityType(typeof(ChatMessage))!;
 
         Assert.False(chat.FindProperty(nameof(Chat.Title))!.IsNullable);
+        Assert.False(chat.FindProperty(nameof(Chat.UserId))!.IsNullable);
+        Assert.Equal(450, chat.FindProperty(nameof(Chat.UserId))!.GetMaxLength());
         Assert.Equal(200, chat.FindProperty(nameof(Chat.Title))!.GetMaxLength());
         Assert.False(message.FindProperty(nameof(ChatMessage.Content))!.IsNullable);
         Assert.False(message.FindProperty(nameof(ChatMessage.Role))!.IsNullable);
         Assert.Equal(20, message.FindProperty(nameof(ChatMessage.Role))!.GetMaxLength());
+    }
+
+    private static ApplicationUser CreateUser()
+    {
+        var id = Guid.NewGuid().ToString();
+        return new ApplicationUser
+        {
+            Id = id,
+            UserName = $"{id}@example.test",
+            NormalizedUserName = $"{id}@EXAMPLE.TEST",
+            Email = $"{id}@example.test",
+            NormalizedEmail = $"{id}@EXAMPLE.TEST"
+        };
     }
 }

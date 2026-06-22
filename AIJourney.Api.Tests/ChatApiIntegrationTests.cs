@@ -14,6 +14,7 @@ public sealed class ChatApiIntegrationTests(ApiTestApplicationFactory factory)
         factory.Ollama.Reset();
         factory.Ollama.QueueChatResponse("Assistant answer");
         var client = factory.CreateClient();
+        await client.RegisterAndLoginAsync("create-chat@example.test");
 
         var createResponse = await client.PostAsJsonAsync(
             "/api/chats",
@@ -48,6 +49,7 @@ public sealed class ChatApiIntegrationTests(ApiTestApplicationFactory factory)
         factory.Ollama.Reset();
         var initialMessage = new string('a', 70);
         var client = factory.CreateClient();
+        await client.RegisterAndLoginAsync("normalize-title@example.test");
 
         var response = await client.PostAsJsonAsync(
             "/api/chats",
@@ -65,6 +67,7 @@ public sealed class ChatApiIntegrationTests(ApiTestApplicationFactory factory)
     {
         factory.Ollama.Reset();
         var client = factory.CreateClient();
+        await client.RegisterAndLoginAsync("update-blank@example.test");
         var chat = await CreateChatAsync(client);
 
         var response = await client.PutAsJsonAsync(
@@ -79,6 +82,7 @@ public sealed class ChatApiIntegrationTests(ApiTestApplicationFactory factory)
     {
         factory.Ollama.Reset();
         var client = factory.CreateClient();
+        await client.RegisterAndLoginAsync("delete-chat@example.test");
         var chat = await CreateChatAsync(client);
 
         var deleteResponse = await client.DeleteAsync($"/api/chats/{chat.Id}");
@@ -97,6 +101,7 @@ public sealed class ChatApiIntegrationTests(ApiTestApplicationFactory factory)
     {
         factory.Ollama.Reset();
         var client = factory.CreateClient();
+        await client.RegisterAndLoginAsync("model-fails@example.test");
         var chat = await CreateChatAsync(client);
         factory.Ollama.QueueFailure();
 
@@ -119,6 +124,7 @@ public sealed class ChatApiIntegrationTests(ApiTestApplicationFactory factory)
     {
         factory.Ollama.Reset();
         var client = factory.CreateClient();
+        await client.RegisterAndLoginAsync("trim-message@example.test");
         var chat = await CreateChatAsync(client);
 
         var response = await client.PostAsJsonAsync(
@@ -137,6 +143,7 @@ public sealed class ChatApiIntegrationTests(ApiTestApplicationFactory factory)
     {
         factory.Ollama.Reset();
         var client = factory.CreateClient();
+        await client.RegisterAndLoginAsync("sql-input@example.test");
         var hostileText = "'; DROP TABLE ChatMessages; --";
 
         var response = await client.PostAsJsonAsync(

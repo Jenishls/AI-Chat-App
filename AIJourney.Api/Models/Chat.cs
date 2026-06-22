@@ -4,6 +4,10 @@ public sealed class Chat
 {
     public Guid Id { get; set; }
 
+    public string UserId { get; set; } = string.Empty;
+
+    public ApplicationUser User { get; set; } = null!;
+
     public string Title { get; set; } = string.Empty;
 
     public DateTimeOffset CreatedAtUtc { get; set; }
